@@ -2,6 +2,9 @@
 import { reactive, ref } from 'vue'
 
 const emit = defineEmits(['login', 'register'])
+defineProps({
+  errorMessage: { type: String, default: '' },
+})
 
 const loginEmail = ref('jordan@example.com')
 const registerForm = reactive({ name: '', email: '', city: '' })
@@ -30,8 +33,8 @@ function submitRegister() {
       <span class="eyebrow">Working MVP</span>
       <h1>Inventory your home, price it with comps, and control what reaches the market.</h1>
       <p>
-        This version runs entirely in the browser with local persistence. It demonstrates the app flow before wiring a
-        hosted backend, payments, and live pricing integrations.
+        This version now talks to a local Express backend for app state. It still uses seeded demo data while the
+        hosted auth, payments, and live pricing integrations are being built.
       </p>
       <ul class="auth-points">
         <li>Private-by-default inventory</li>
@@ -51,11 +54,12 @@ function submitRegister() {
         </label>
         <button class="button button-primary" type="button" @click="submitLogin">Continue</button>
         <p v-if="loginMessage" class="inline-feedback">{{ loginMessage }}</p>
+        <p v-if="errorMessage" class="inline-feedback">{{ errorMessage }}</p>
       </article>
 
       <article class="panel">
         <h2>Create local account</h2>
-        <p>This is MVP auth only. Accounts live in local storage until a real backend is added.</p>
+        <p>This is MVP auth only. Accounts are now persisted by the local backend.</p>
         <label>
           Name
           <input v-model="registerForm.name" type="text" placeholder="Morgan Lee" />

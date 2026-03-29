@@ -1,38 +1,34 @@
-import { computed, ref, watch } from 'vue'
-import { createId, estimateValue, seedState } from '../lib/seed'
-
-const STORAGE_KEY = 'wiw-mvp-state-v1'
+import { computed, ref } from 'vue'
+import { seedState } from '../lib/seed'
 
 function cloneSeed() {
   return JSON.parse(JSON.stringify(seedState))
 }
 
-function loadState() {
-  if (typeof window === 'undefined') return cloneSeed()
-  const stored = window.localStorage.getItem(STORAGE_KEY)
-  if (!stored) return cloneSeed()
+async function request(path, options = {}) {
+  const response = await fetch(path, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
+    ...options,
+  })
 
-  try {
-    return { ...cloneSeed(), ...JSON.parse(stored) }
-  } catch {
-    return cloneSeed()
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(payload.message || 'Request failed.')
   }
+
+  return payload
 }
 
 export function useAppState() {
-  const state = ref(loadState())
+  const state = ref(cloneSeed())
   const activeView = ref('overview')
   const selectedItemId = ref(state.value.items.find((item) => item.ownerId === state.value.activeUserId)?.id || null)
-
-  watch(
-    state,
-    (value) => {
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(value))
-      }
-    },
-    { deep: true },
-  )
+  const isReady = ref(false)
+  const isSaving = ref(false)
+  const errorMessage = ref('')
 
   const currentUser = computed(() => state.value.users.find((user) => user.id === state.value.activeUserId) || null)
   const ownedItems = computed(() => state.value.items.filter((item) => item.ownerId === state.value.activeUserId))
@@ -50,127 +46,162 @@ export function useAppState() {
     return sum
   }, { low: 0, high: 0 }))
 
-  function registerUser({ name, email, city }) {
-    const existing = state.value.users.find((user) => user.email.toLowerCase() === email.toLowerCase())
-    if (existing) {
-      state.value.activeUserId = existing.id
-      return { ok: true, mode: 'login' }
+  function applyState(nextState) {
+    state.value = nextState
+
+    if (!selectedItemId.value || !ownedItems.value.find((item) => item.id === selectedItemId.value)) {
+      selectedItemId.value = ownedItems.value[0]?.id || null
     }
-
-    const id = createId('user')
-    const initials = name.split(' ').slice(0, 2).map((part) => part[0]?.toUpperCase() || '').join('')
-    state.value.users.push({ id, name, email, city, initials })
-    state.value.activeUserId = id
-    return { ok: true, mode: 'register' }
   }
 
-  function login(email) {
-    const user = state.value.users.find((entry) => entry.email.toLowerCase() === email.toLowerCase())
-    if (!user) return { ok: false, message: 'No account exists for that email yet.' }
-    state.value.activeUserId = user.id
-    return { ok: true }
+  async function runMutation(task) {
+    isSaving.value = true
+    errorMessage.value = ''
+
+    try {
+      return await task()
+    } catch (error) {
+      errorMessage.value = error.message
+      throw error
+    } finally {
+      isSaving.value = false
+    }
   }
 
-  function logout() {
-    state.value.activeUserId = null
+  async function fetchState() {
+    try {
+      const payload = await request('/api/state')
+      applyState(payload.state)
+      errorMessage.value = ''
+    } catch (error) {
+      errorMessage.value = error.message
+      throw error
+    } finally {
+      isReady.value = true
+    }
+  }
+
+  async function registerUser(payload) {
+    const response = await runMutation(() =>
+      request('/api/auth/register', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    )
+
+    applyState(response.state)
+    return response.result
+  }
+
+  async function login(email) {
+    try {
+      const response = await runMutation(() =>
+        request('/api/auth/login', {
+          method: 'POST',
+          body: JSON.stringify({ email }),
+        }),
+      )
+
+      applyState(response.state)
+      return response.result
+    } catch (error) {
+      return { ok: false, message: error.message }
+    }
+  }
+
+  async function logout() {
+    const response = await runMutation(() =>
+      request('/api/auth/logout', {
+        method: 'POST',
+      }),
+    )
+
+    applyState(response.state)
     activeView.value = 'overview'
   }
 
-  function addItem(payload) {
-    const estimate = estimateValue(payload.category, payload.condition, payload.photoCount)
-    const item = {
-      id: createId('item'),
-      ownerId: state.value.activeUserId,
-      title: payload.title,
-      category: payload.category,
-      room: payload.room,
-      condition: payload.condition,
-      photoCount: Number(payload.photoCount),
-      notes: payload.notes,
-      visibility: payload.visibility,
-      estimatedLow: estimate.low,
-      estimatedHigh: estimate.high,
-      confidence: estimate.confidence,
-      createdAt: new Date().toISOString(),
-    }
-    state.value.items.unshift(item)
-    selectedItemId.value = item.id
-    return item
+  async function addItem(payload) {
+    const response = await runMutation(() =>
+      request('/api/items', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    )
+
+    applyState(response.state)
+    selectedItemId.value = response.item.id
+    return response.item
   }
 
-  function updateItem(itemId, updates) {
-    const item = state.value.items.find((entry) => entry.id === itemId)
-    if (!item) return
-    Object.assign(item, updates)
-    if (updates.category !== undefined || updates.condition !== undefined || updates.photoCount !== undefined) {
-      const estimate = estimateValue(item.category, item.condition, item.photoCount)
-      item.estimatedLow = estimate.low
-      item.estimatedHigh = estimate.high
-      item.confidence = estimate.confidence
-    }
+  async function updateItem(itemId, updates) {
+    const response = await runMutation(() =>
+      request(`/api/items/${itemId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(updates),
+      }),
+    )
+
+    applyState(response.state)
+    return response.item
   }
 
-  function createListing(itemId, details) {
-    const item = state.value.items.find((entry) => entry.id === itemId)
-    if (!item) return null
-    const existing = state.value.listings.find((listing) => listing.itemId === itemId && listing.status === 'active')
-    if (existing) {
-      Object.assign(existing, details)
-      item.visibility = 'listed'
-      return existing
-    }
+  async function createListing(itemId, details) {
+    const response = await runMutation(() =>
+      request('/api/listings', {
+        method: 'POST',
+        body: JSON.stringify({ itemId, details }),
+      }),
+    )
 
-    const listing = {
-      id: createId('listing'),
-      itemId,
-      ownerId: item.ownerId,
-      title: item.title,
-      askingPrice: Number(details.askingPrice),
-      mode: details.mode,
-      radiusMiles: Number(details.radiusMiles),
-      status: 'active',
-      publishedAt: new Date().toISOString(),
-    }
-    state.value.listings.unshift(listing)
-    item.visibility = 'listed'
-    return listing
+    applyState(response.state)
+    return response.listing
   }
 
-  function archiveListing(listingId) {
-    const listing = state.value.listings.find((entry) => entry.id === listingId)
-    if (!listing) return
-    listing.status = 'archived'
-    const item = state.value.items.find((entry) => entry.id === listing.itemId)
-    if (item && item.ownerId === state.value.activeUserId) item.visibility = 'private'
+  async function archiveListing(listingId) {
+    const response = await runMutation(() =>
+      request(`/api/listings/${listingId}/archive`, {
+        method: 'POST',
+      }),
+    )
+
+    applyState(response.state)
   }
 
-  function createOffer(payload) {
-    const offer = {
-      id: createId('offer'),
-      kind: payload.kind,
-      listingId: payload.listingId || null,
-      itemId: payload.itemId,
-      buyerId: state.value.activeUserId,
-      buyerName: currentUser.value?.name || 'Unknown buyer',
-      amount: Number(payload.amount),
-      note: payload.note,
-      status: 'pending',
-      createdAt: new Date().toISOString(),
-    }
-    state.value.offers.unshift(offer)
-    return offer
+  async function createOffer(payload) {
+    const response = await runMutation(() =>
+      request('/api/offers', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    )
+
+    applyState(response.state)
+    return response.offer
   }
 
-  function respondToOffer(offerId, status) {
-    const offer = state.value.offers.find((entry) => entry.id === offerId)
-    if (offer) offer.status = status
+  async function respondToOffer(offerId, status) {
+    const response = await runMutation(() =>
+      request(`/api/offers/${offerId}/respond`, {
+        method: 'POST',
+        body: JSON.stringify({ status }),
+      }),
+    )
+
+    applyState(response.state)
   }
 
-  function resetDemo() {
-    state.value = cloneSeed()
-    selectedItemId.value = state.value.items.find((item) => item.ownerId === state.value.activeUserId)?.id || null
+  async function resetDemo() {
+    const response = await runMutation(() =>
+      request('/api/dev/reset', {
+        method: 'POST',
+      }),
+    )
+
+    applyState(response.state)
     activeView.value = 'overview'
   }
+
+  fetchState()
 
   return {
     state,
@@ -186,6 +217,10 @@ export function useAppState() {
     selectedItem,
     selectedItemComps,
     portfolioValue,
+    isReady,
+    isSaving,
+    errorMessage,
+    fetchState,
     registerUser,
     login,
     logout,

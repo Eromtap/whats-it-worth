@@ -1,6 +1,6 @@
 # What's It Worth
 
-Vue MVP for a household inventory and local marketplace app.
+Vue + Express MVP for a household inventory and local marketplace app.
 
 ## What it does
 
@@ -11,7 +11,7 @@ Vue MVP for a household inventory and local marketplace app.
 - publish inventory items as marketplace listings
 - keep items private while still accepting blind offers
 - manage incoming and outgoing offers in an inbox
-- persist all state in browser `localStorage`
+- persist application state through a local Express API
 
 ## Run it
 
@@ -28,20 +28,22 @@ npm run build
 
 ## Current architecture
 
-- `src/composables/useAppState.js`: local app state, persistence, and actions
+- `server/index.js`: Express API for auth, items, listings, offers, and demo reset
+- `server/store.js`: file-backed state persistence in `data/app-state.json`
+- `src/composables/useAppState.js`: frontend state hydration and API mutations
 - `src/lib/seed.js`: seeded demo users, items, listings, offers, and valuation helpers
 - `src/components/`: auth, inventory, valuation, marketplace, inbox, and header views
 - `src/App.vue`: screen orchestration
 
 ## Important limitation
 
-This is still a client-side MVP. It does not yet include:
+This is now a local full-stack MVP. It does not yet include:
 
 - hosted auth
 - real cloud image uploads
 - live eBay or market comp ingestion
 - payments
-- server-side privacy rules or moderation
+- a production database or server-side privacy rules
 
 ## Recommended next phase
 

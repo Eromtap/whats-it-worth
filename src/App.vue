@@ -26,8 +26,9 @@ watch(
 )
 
 function handleLogin({ email, onResult }) {
-  const result = app.login(email)
-  onResult?.(result)
+  app.login(email).then((result) => {
+    onResult?.(result)
+  })
 }
 
 function handleRegister(payload) {
@@ -35,14 +36,15 @@ function handleRegister(payload) {
 }
 
 function handleAddItem(payload) {
-  const item = app.addItem(payload)
-  if (payload.visibility === 'listed') {
-    app.createListing(item.id, {
-      askingPrice: item.estimatedHigh,
-      mode: 'sale',
-      radiusMiles: 15,
-    })
-  }
+  app.addItem(payload).then((item) => {
+    if (payload.visibility === 'listed') {
+      app.createListing(item.id, {
+        askingPrice: item.estimatedHigh,
+        mode: 'sale',
+        radiusMiles: 15,
+      })
+    }
+  })
 }
 
 function toggleTheme() {
@@ -52,7 +54,20 @@ function toggleTheme() {
 
 <template>
   <div class="app-shell">
-    <AuthPanel v-if="!app.currentUser.value" @login="handleLogin" @register="handleRegister" />
+    <section v-if="!app.isReady.value" class="panel">
+      <span class="eyebrow">Loading</span>
+      <h2>Connecting to backend</h2>
+      <p>Fetching application state from the Express API.</p>
+    </section>
+
+    <section v-else-if="app.errorMessage.value && !app.currentUser.value" class="panel">
+      <span class="eyebrow">Connection issue</span>
+      <h2>Backend request failed</h2>
+      <p>{{ app.errorMessage.value }}</p>
+      <button class="button button-primary" type="button" @click="app.fetchState">Retry</button>
+    </section>
+
+    <AuthPanel v-else-if="!app.currentUser.value" :error-message="app.errorMessage.value" @login="handleLogin" @register="handleRegister" />
 
     <template v-else>
       <AppHeader
@@ -67,6 +82,12 @@ function toggleTheme() {
       />
 
       <main class="main-shell">
+        <div v-if="app.errorMessage.value" class="panel">
+          <span class="eyebrow">Request issue</span>
+          <h2>Latest backend error</h2>
+          <p>{{ app.errorMessage.value }}</p>
+        </div>
+
         <OverviewView
           v-if="app.activeView.value === 'overview'"
           :current-user="app.currentUser.value"
