@@ -1,0 +1,610 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider     = "postgresql"
+  url          = env("DATABASE_URL")
+  relationMode = "prisma"
+}
+
+model UserAccount {
+  id                        String                      @id @default(cuid())
+  primaryEmail              String                      @unique
+  createdAt                 DateTime                    @default(now())
+  updatedAt                 DateTime                    @updatedAt
+
+  profile                   UserProfile?
+  notificationPreference    UserNotificationPreference?
+  authIdentities            AuthIdentity[]
+  addresses                 UserAddress[]
+  inventoryLocations        InventoryLocation[]
+  items                     Item[]
+  listings                  Listing[]
+  offersSent                Offer[]                     @relation("OfferBuyer")
+  offersReceived            Offer[]                     @relation("OfferSeller")
+  listingRevisionsUpdated   ListingRevision[]
+  offerStatusChanges        OfferStatusHistory[]
+  conversationsCreated      Conversation[]              @relation("ConversationCreatedBy")
+  conversationParticipants  ConversationParticipant[]
+  messages                  Message[]
+  transactionsAsBuyer       Transaction[]               @relation("TransactionBuyer")
+  transactionsAsSeller      Transaction[]               @relation("TransactionSeller")
+  transactionStatusChanges  TransactionStatusHistory[]
+  socialConnections         SocialAccountConnection[]
+  shareLinksCreated         ShareLink[]                 @relation("ShareLinkCreatedBy")
+  socialPosts               SocialPost[]
+  marketplaceEventsActed    MarketplaceEvent[]          @relation("MarketplaceEventActor")
+  valuationRunsRequested    ValuationRun[]
+}
+
+model UserProfile {
+  userId         String       @id
+  displayName    String
+  avatarUrl      String?
+  bio            String?
+  publicCity     String?
+  publicState    String?
+  reputationScore Int?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  user           UserAccount  @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UserNotificationPreference {
+  userId                 String       @id
+  emailOffers            Boolean      @default(true)
+  emailMessages          Boolean      @default(true)
+  emailListingActivity   Boolean      @default(true)
+  pushOffers             Boolean      @default(true)
+  pushMessages           Boolean      @default(true)
+  marketingEmails        Boolean      @default(false)
+  updatedAt              DateTime     @updatedAt
+
+  user                   UserAccount  @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AuthProvider {
+  code        String         @id
+  name        String         @unique
+  identities  AuthIdentity[]
+}
+
+model AuthIdentity {
+  id               String        @id @default(cuid())
+  userId           String
+  providerCode     String
+  providerSubject  String
+  providerEmail    String?
+  createdAt        DateTime      @default(now())
+  lastLoginAt      DateTime?
+
+  user             UserAccount   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider         AuthProvider  @relation(fields: [providerCode], references: [code])
+
+  @@unique([providerCode, providerSubject])
+  @@index([userId, providerCode])
+}
+
+model UserAddress {
+  id            String        @id @default(cuid())
+  userId        String
+  label         String
+  line1         String
+  line2         String?
+  city          String
+  stateRegion   String
+  postalCode    String
+  countryCode   String
+  latitude      Decimal?      @db.Decimal(9, 6)
+  longitude     Decimal?      @db.Decimal(9, 6)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  user          UserAccount   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pickupListings Listing[]
+  appointments  FulfillmentAppointment[]
+
+  @@index([userId, label])
+}
+
+model Category {
+  id                String      @id @default(cuid())
+  name              String
+  slug              String      @unique
+  parentCategoryId  String?
+
+  parentCategory    Category?   @relation("CategoryHierarchy", fields: [parentCategoryId], references: [id], onDelete: SetNull)
+  childCategories   Category[]  @relation("CategoryHierarchy")
+  items             Item[]
+
+  @@unique([parentCategoryId, name])
+}
+
+model ItemConditionType {
+  code       String  @id
+  name       String  @unique
+  sortOrder  Int?
+
+  items      Item[]
+}
+
+model ItemVisibilityType {
+  code       String  @id
+  name       String  @unique
+
+  items      Item[]
+}
+
+model InventoryLocation {
+  id          String       @id @default(cuid())
+  userId       String
+  name         String
+  description  String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  user         UserAccount  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items        Item[]
+
+  @@unique([userId, name])
+}
+
+model Item {
+  id                   String               @id @default(cuid())
+  ownerUserId          String
+  categoryId           String
+  conditionCode        String
+  visibilityCode       String
+  inventoryLocationId  String?
+  title                String
+  description          String?
+  notes                String?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  owner                UserAccount          @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  category             Category             @relation(fields: [categoryId], references: [id])
+  condition            ItemConditionType    @relation(fields: [conditionCode], references: [code])
+  visibility           ItemVisibilityType   @relation(fields: [visibilityCode], references: [code])
+  inventoryLocation    InventoryLocation?   @relation(fields: [inventoryLocationId], references: [id], onDelete: SetNull)
+  photos               ItemPhoto[]
+  listings             Listing[]
+  offers               Offer[]
+  valuationRuns        ValuationRun[]
+  comparableSales      ComparableSale[]
+  transactions         Transaction[]
+  events               MarketplaceEvent[]
+
+  @@index([ownerUserId, createdAt])
+  @@index([ownerUserId, visibilityCode])
+  @@index([categoryId])
+}
+
+model ItemPhoto {
+  id             String     @id @default(cuid())
+  itemId         String
+  storagePath    String
+  altText        String?
+  sortOrder      Int        @default(0)
+  createdAt      DateTime   @default(now())
+
+  item           Item       @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([itemId, sortOrder])
+}
+
+model ListingModeType {
+  code       String  @id
+  name       String  @unique
+
+  revisions  ListingRevision[]
+}
+
+model ListingStatusType {
+  code       String  @id
+  name       String  @unique
+  isClosed   Boolean @default(false)
+
+  listings   Listing[]
+}
+
+model Listing {
+  id                  String               @id @default(cuid())
+  itemId              String
+  sellerUserId        String
+  statusCode          String
+  currentRevisionId   String?              @unique
+  marketRadiusMiles   Int?
+  pickupAddressId     String?
+  publishedAt         DateTime?
+  closedAt            DateTime?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  item                Item                 @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  seller              UserAccount          @relation(fields: [sellerUserId], references: [id], onDelete: Cascade)
+  status              ListingStatusType    @relation(fields: [statusCode], references: [code])
+  currentRevision     ListingRevision?     @relation("ListingCurrentRevision", fields: [currentRevisionId], references: [id], onDelete: SetNull)
+  pickupAddress       UserAddress?         @relation(fields: [pickupAddressId], references: [id], onDelete: SetNull)
+  revisions           ListingRevision[]    @relation("ListingRevisions")
+  offers              Offer[]
+  conversations       Conversation[]
+  transactions        Transaction[]
+  shareLinks          ShareLink[]
+  socialPosts         SocialPost[]
+  events              MarketplaceEvent[]
+
+  @@index([sellerUserId, statusCode, createdAt])
+  @@index([itemId, statusCode])
+  @@index([statusCode, publishedAt])
+}
+
+model ListingRevision {
+  id                  String             @id @default(cuid())
+  listingId           String
+  revisionNumber      Int
+  modeCode            String
+  title               String
+  description         String?
+  askingPriceAmount   Int
+  updatedByUserId     String
+  createdAt           DateTime           @default(now())
+
+  listing             Listing            @relation("ListingRevisions", fields: [listingId], references: [id], onDelete: Cascade)
+  mode                ListingModeType    @relation(fields: [modeCode], references: [code])
+  updatedByUser       UserAccount        @relation(fields: [updatedByUserId], references: [id], onDelete: Restrict)
+  currentForListing   Listing?           @relation("ListingCurrentRevision")
+
+  @@unique([listingId, revisionNumber])
+  @@index([listingId, createdAt])
+}
+
+model OfferKindType {
+  code       String   @id
+  name       String   @unique
+
+  offers     Offer[]
+}
+
+model OfferStatusType {
+  code       String              @id
+  name       String              @unique
+  isClosed   Boolean             @default(false)
+
+  offers     Offer[]
+  history    OfferStatusHistory[]
+}
+
+model Offer {
+  id                  String               @id @default(cuid())
+  itemId              String
+  listingId           String?
+  buyerUserId         String
+  sellerUserId        String
+  kindCode            String
+  statusCode          String
+  amount              Int
+  note                String?
+  expiresAt           DateTime?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  item                Item                 @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  listing             Listing?             @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  buyer               UserAccount          @relation("OfferBuyer", fields: [buyerUserId], references: [id], onDelete: Cascade)
+  seller              UserAccount          @relation("OfferSeller", fields: [sellerUserId], references: [id], onDelete: Cascade)
+  kind                OfferKindType        @relation(fields: [kindCode], references: [code])
+  status              OfferStatusType      @relation(fields: [statusCode], references: [code])
+  statusHistory       OfferStatusHistory[]
+  transaction         Transaction?
+  conversations       Conversation[]
+  events              MarketplaceEvent[]
+
+  @@index([sellerUserId, statusCode, createdAt])
+  @@index([buyerUserId, statusCode, createdAt])
+  @@index([itemId, createdAt])
+  @@index([listingId, createdAt])
+}
+
+model OfferStatusHistory {
+  id                String            @id @default(cuid())
+  offerId           String
+  statusCode        String
+  changedByUserId   String
+  reasonNote        String?
+  changedAt         DateTime          @default(now())
+
+  offer             Offer             @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  status            OfferStatusType   @relation(fields: [statusCode], references: [code])
+  changedByUser     UserAccount       @relation(fields: [changedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([offerId, changedAt])
+}
+
+model MessageType {
+  code       String    @id
+  name       String    @unique
+
+  messages   Message[]
+}
+
+model Conversation {
+  id                String                      @id @default(cuid())
+  listingId         String?
+  itemId            String?
+  offerId           String?
+  createdByUserId   String
+  createdAt         DateTime                    @default(now())
+
+  listing           Listing?                    @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  item              Item?                       @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  offer             Offer?                      @relation(fields: [offerId], references: [id], onDelete: SetNull)
+  createdByUser     UserAccount                 @relation("ConversationCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  participants      ConversationParticipant[]
+  messages          Message[]
+
+  @@index([listingId])
+  @@index([itemId])
+  @@index([offerId])
+}
+
+model ConversationParticipant {
+  conversationId   String
+  userId           String
+  joinedAt         DateTime      @default(now())
+  lastReadAt       DateTime?
+
+  conversation     Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user             UserAccount   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, userId])
+  @@index([userId, lastReadAt])
+}
+
+model Message {
+  id               String         @id @default(cuid())
+  conversationId   String
+  senderUserId     String
+  messageTypeCode  String
+  body             String
+  createdAt        DateTime       @default(now())
+
+  conversation     Conversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderUser       UserAccount    @relation(fields: [senderUserId], references: [id], onDelete: Restrict)
+  messageType      MessageType    @relation(fields: [messageTypeCode], references: [code])
+  events           MarketplaceEvent[]
+
+  @@index([conversationId, createdAt])
+  @@index([senderUserId, createdAt])
+}
+
+model TransactionStatusType {
+  code        String                 @id
+  name        String                 @unique
+  isClosed    Boolean                @default(false)
+
+  transactions Transaction[]
+  history      TransactionStatusHistory[]
+}
+
+model FulfillmentMethodType {
+  code         String                  @id
+  name         String                  @unique
+
+  transactions Transaction[]
+}
+
+model Transaction {
+  id                      String                  @id @default(cuid())
+  itemId                  String
+  listingId               String?
+  acceptedOfferId         String                  @unique
+  buyerUserId             String
+  sellerUserId            String
+  statusCode              String
+  fulfillmentMethodCode   String?
+  agreedPriceAmount       Int
+  createdAt               DateTime                @default(now())
+  completedAt             DateTime?
+
+  item                    Item                    @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  listing                 Listing?                @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  acceptedOffer           Offer                   @relation(fields: [acceptedOfferId], references: [id], onDelete: Restrict)
+  buyerUser               UserAccount             @relation("TransactionBuyer", fields: [buyerUserId], references: [id], onDelete: Restrict)
+  sellerUser              UserAccount             @relation("TransactionSeller", fields: [sellerUserId], references: [id], onDelete: Restrict)
+  status                  TransactionStatusType   @relation(fields: [statusCode], references: [code])
+  fulfillmentMethod       FulfillmentMethodType?  @relation(fields: [fulfillmentMethodCode], references: [code])
+  appointments            FulfillmentAppointment[]
+  statusHistory           TransactionStatusHistory[]
+  events                  MarketplaceEvent[]
+
+  @@index([buyerUserId, statusCode, createdAt])
+  @@index([sellerUserId, statusCode, createdAt])
+  @@index([itemId])
+  @@index([listingId])
+}
+
+model FulfillmentAppointment {
+  id               String         @id @default(cuid())
+  transactionId    String
+  addressId        String?
+  scheduledFor     DateTime
+  notes            String?
+  createdAt        DateTime       @default(now())
+
+  transaction      Transaction    @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  address          UserAddress?   @relation(fields: [addressId], references: [id], onDelete: SetNull)
+
+  @@index([transactionId, scheduledFor])
+}
+
+model TransactionStatusHistory {
+  id                String                 @id @default(cuid())
+  transactionId     String
+  statusCode        String
+  changedByUserId   String
+  reasonNote        String?
+  changedAt         DateTime               @default(now())
+
+  transaction       Transaction            @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  status            TransactionStatusType  @relation(fields: [statusCode], references: [code])
+  changedByUser     UserAccount            @relation(fields: [changedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([transactionId, changedAt])
+}
+
+model ValuationSourceType {
+  code             String           @id
+  name             String           @unique
+
+  comparableSales  ComparableSale[]
+}
+
+model ValuationRun {
+  id                  String              @id @default(cuid())
+  itemId              String
+  requestedByUserId   String?
+  algorithmName       String
+  algorithmVersion    String?
+  estimatedLowAmount  Int
+  estimatedHighAmount Int
+  confidenceScore     Int?
+  createdAt           DateTime            @default(now())
+
+  item                Item                @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  requestedByUser     UserAccount?        @relation(fields: [requestedByUserId], references: [id], onDelete: SetNull)
+  comparableSales     ComparableSale[]
+
+  @@index([itemId, createdAt])
+}
+
+model ComparableSale {
+  id                String               @id @default(cuid())
+  itemId            String
+  valuationRunId    String?
+  sourceCode        String
+  sourceListingUrl  String?
+  title             String
+  soldPriceAmount   Int
+  soldAt            DateTime
+  createdAt         DateTime             @default(now())
+
+  item              Item                 @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  valuationRun      ValuationRun?        @relation(fields: [valuationRunId], references: [id], onDelete: SetNull)
+  source            ValuationSourceType  @relation(fields: [sourceCode], references: [code])
+
+  @@index([itemId, soldAt])
+  @@index([valuationRunId])
+}
+
+model SocialPlatform {
+  code            String                    @id
+  name            String                    @unique
+
+  accountConnections SocialAccountConnection[]
+  socialPosts        SocialPost[]
+}
+
+model ShareChannelType {
+  code          String       @id
+  name          String       @unique
+
+  shareLinks     ShareLink[]
+}
+
+model SocialAccountConnection {
+  id                 String           @id @default(cuid())
+  userId             String
+  platformCode       String
+  externalAccountId  String
+  accountHandle      String?
+  createdAt          DateTime         @default(now())
+
+  user               UserAccount      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platform           SocialPlatform   @relation(fields: [platformCode], references: [code])
+
+  @@unique([platformCode, externalAccountId])
+  @@index([userId, platformCode])
+}
+
+model ShareLink {
+  id                String            @id @default(cuid())
+  itemId            String?
+  listingId         String?
+  createdByUserId   String
+  channelCode       String
+  shareToken        String            @unique
+  destinationUrl    String?
+  createdAt         DateTime          @default(now())
+  expiresAt         DateTime?
+
+  item              Item?             @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  listing           Listing?          @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  createdByUser     UserAccount       @relation("ShareLinkCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  channel           ShareChannelType  @relation(fields: [channelCode], references: [code])
+  socialPosts       SocialPost[]
+
+  @@index([itemId])
+  @@index([listingId])
+  @@index([createdByUserId, createdAt])
+}
+
+model SocialPost {
+  id                 String           @id @default(cuid())
+  shareLinkId        String?
+  listingId          String?
+  postedByUserId     String
+  platformCode       String
+  externalPostId     String?
+  postUrl            String?
+  caption            String?
+  createdAt          DateTime         @default(now())
+
+  shareLink          ShareLink?       @relation(fields: [shareLinkId], references: [id], onDelete: SetNull)
+  listing            Listing?         @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  postedByUser       UserAccount      @relation(fields: [postedByUserId], references: [id], onDelete: Restrict)
+  platform           SocialPlatform   @relation(fields: [platformCode], references: [code])
+
+  @@index([shareLinkId])
+  @@index([listingId])
+  @@index([postedByUserId, createdAt])
+}
+
+model MarketplaceEventType {
+  code      String              @id
+  name      String              @unique
+
+  events    MarketplaceEvent[]
+}
+
+model MarketplaceEvent {
+  id               String                @id @default(cuid())
+  eventTypeCode    String
+  actorUserId      String?
+  itemId           String?
+  listingId        String?
+  offerId          String?
+  transactionId    String?
+  conversationId   String?
+  messageId        String?
+  occurredAt       DateTime              @default(now())
+  summary          String?
+
+  eventType        MarketplaceEventType  @relation(fields: [eventTypeCode], references: [code])
+  actorUser        UserAccount?          @relation("MarketplaceEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  item             Item?                 @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  listing          Listing?              @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  offer            Offer?                @relation(fields: [offerId], references: [id], onDelete: SetNull)
+  transaction      Transaction?          @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  conversation     Conversation?         @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  message          Message?              @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@index([eventTypeCode, occurredAt])
+  @@index([actorUserId, occurredAt])
+  @@index([itemId, occurredAt])
+  @@index([listingId, occurredAt])
+  @@index([offerId, occurredAt])
+  @@index([transactionId, occurredAt])
+}
